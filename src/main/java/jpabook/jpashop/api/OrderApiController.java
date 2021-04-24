@@ -6,6 +6,8 @@ import jpabook.jpashop.domain.OrderItem;
 import jpabook.jpashop.domain.OrderStatus;
 import jpabook.jpashop.repository.OrderRepository;
 import jpabook.jpashop.repository.OrderSearch;
+import jpabook.jpashop.repository.order.query.OrderFlatDto;
+import jpabook.jpashop.repository.order.query.OrderItemQueryDto;
 import jpabook.jpashop.repository.order.query.OrderQueryDto;
 import jpabook.jpashop.repository.order.query.OrderQueryRepository;
 import lombok.Data;
@@ -18,6 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static java.util.stream.Collectors.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -44,7 +48,7 @@ public class OrderApiController {
         List<Order> orders = orderRepository.findAllByString(new OrderSearch());
         return orders.stream()
                 .map(o -> new OrderDto(o))
-                .collect(Collectors.toList());
+                .collect(toList());
     }
 
     /**
@@ -59,7 +63,7 @@ public class OrderApiController {
 
         return orders.stream()
                 .map(o -> new OrderDto(o))
-                .collect(Collectors.toList());
+                .collect(toList());
     }
 
     /**
@@ -75,12 +79,48 @@ public class OrderApiController {
 
         return orders.stream()
                 .map(o -> new OrderDto(o))
-                .collect(Collectors.toList());
+                .collect(toList());
     }
 
     @GetMapping("/api/v4/orders")
     public List<OrderQueryDto> ordersV4() {
         return orderQueryRepository.findOrderQueryDtos();
+    }
+
+    /**
+     * ToOne 관계만 조인쿼리로 전부 가져온 뒤 orderItems를 가져오기 위해
+     * orderId를 in절로 조회함, 조회한 orderItems들은 orderId별로 Map에
+     * List형태로 담아둔 뒤 Order를 foreach로 돌리며 세팅
+     * api스펙에 정확히 맞춰서 데이터를 가져옴
+     * 대신, 코드가 복잡해짐
+     */
+    @GetMapping("/api/v5/orders")
+    public List<OrderQueryDto> ordersV5() {
+        return orderQueryRepository.findAllByDto_optimization();
+    }
+
+    /**
+     * 모든 연관관계를 조인쿼리로 한번에 가져옴
+     * 가져온 데이터들을 stream으로 돌리며 중복데이터 그룹핑처리 및 api스펙에 맞게
+     * dto변환처리
+     * V5에 비해 수행되는 쿼리횟수가 적음
+     * 데이터 양이 많아 질 수록 조회하는 데이터양이 기하 급수적으로 늘어남
+     */
+    @GetMapping("/api/v6/orders")
+    public List<OrderQueryDto> ordersV6() {
+        List<OrderFlatDto> flats = orderQueryRepository.findAllByDto_flat();
+
+        return flats.stream()
+                .collect(groupingBy(o -> new OrderQueryDto(o.getOrderId(),
+                                o.getName(), o.getOrderDate(), o.getOrderStatus(), o.getAddress()),
+                        mapping(o -> new OrderItemQueryDto(o.getOrderId(),
+                                o.getItemName(), o.getOrderPrice(), o.getCount()), toList())
+                )).entrySet().stream()
+                .map(e -> new OrderQueryDto(e.getKey().getOrderId(),
+                        e.getKey().getName(), e.getKey().getOrderDate(), e.getKey().getOrderStatus(),
+                        e.getKey().getAddress(), e.getValue()))
+                .collect(toList());
+
     }
 
     @Data
@@ -102,7 +142,7 @@ public class OrderApiController {
             this.address = order.getDelivery().getAddress();
             this.orderItems = order.getOrderItems().stream()
                     .map(orderItem -> new OrderItemDto(orderItem))
-                    .collect(Collectors.toList());
+                    .collect(toList());
         }
     }
 
